@@ -1,4 +1,7 @@
 fastapi
 uvicorn
 skyfield
+skyfield-data
 pydantic
+requests
+pandas
