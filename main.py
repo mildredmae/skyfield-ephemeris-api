@@ -7,7 +7,7 @@ import os
 import traceback
 import swisseph as swe
 
-app = FastAPI(title="Skyfield Ephemeris API", version="1.2.3")
+app = FastAPI(title="Skyfield Ephemeris API", version="1.2.4")
 
 # ----------------------------
 # Global loads (faster on Render)
@@ -49,8 +49,18 @@ HOUSE_SYSTEM_MAP: Dict[str, bytes] = {
 }
 
 
-def normalize_deg(deg: float) -> float:
-    return deg % 360.0
+def to_py_float(x: Any) -> float:
+    # Handles numpy.float64, Decimal-like, etc.
+    return float(x)
+
+
+def to_py_bool(x: Any) -> bool:
+    # Handles numpy.bool_ etc.
+    return bool(x)
+
+
+def normalize_deg(deg: Any) -> float:
+    return to_py_float(deg) % 360.0
 
 
 def to_utc_datetime(date_str: str, time_str: str, tz_offset: float) -> datetime:
@@ -72,11 +82,11 @@ def retrograde_flag(observer, body, t) -> bool:
     dt2 = dt1 + timedelta(hours=1)
     t2 = ts.utc(dt2.year, dt2.month, dt2.day, dt2.hour, dt2.minute, dt2.second)
 
-    p1 = observer.at(t).observe(body).apparent().ecliptic_latlon()[0].degrees
-    p2 = observer.at(t2).observe(body).apparent().ecliptic_latlon()[0].degrees
+    p1 = to_py_float(observer.at(t).observe(body).apparent().ecliptic_latlon()[0].degrees)
+    p2 = to_py_float(observer.at(t2).observe(body).apparent().ecliptic_latlon()[0].degrees)
 
-    delta = ((p2 - p1 + 540) % 360) - 180
-    return delta < 0
+    delta = ((p2 - p1 + 540.0) % 360.0) - 180.0
+    return to_py_bool(delta < 0.0)
 
 
 def assign_house_quadrant(lonp: float, cusps_deg: List[float]) -> int:
@@ -93,11 +103,13 @@ def assign_house_quadrant(lonp: float, cusps_deg: List[float]) -> int:
 
 
 def swe_julday_ut(utc_dt: datetime) -> float:
-    return swe.julday(
-        utc_dt.year,
-        utc_dt.month,
-        utc_dt.day,
-        utc_dt.hour + utc_dt.minute / 60.0 + utc_dt.second / 3600.0
+    return to_py_float(
+        swe.julday(
+            utc_dt.year,
+            utc_dt.month,
+            utc_dt.day,
+            utc_dt.hour + utc_dt.minute / 60.0 + utc_dt.second / 3600.0
+        )
     )
 
 
@@ -120,13 +132,6 @@ def swe_fixstar_lon(jd_ut: float, star_name: str) -> Tuple[Optional[float], Opti
 
 
 def extract_house_cusps(cusps: Any) -> Tuple[Optional[List[float]], Optional[str]]:
-    """
-    Normalize Swiss 'cusps' return into a 12-length list of degrees.
-
-    Common shapes:
-      - len == 13: valid indices 1..12 (index 0 unused)
-      - len == 12: valid indices 0..11
-    """
     try:
         n = len(cusps)
     except Exception:
@@ -149,7 +154,6 @@ def health():
         "status": "ok",
         "version": app.version,
         "swiss_ephe_path": SWEPH_PATH,
-        "python_note": "Render log indicates python3.13 runtime.",
     }
 
 
@@ -183,15 +187,15 @@ def ephemeris_endpoint(data: EphemerisRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             results[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": lat.degrees,
+                "lat_deg": to_py_float(lat.degrees),
             }
 
         return {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": data.tz},
+                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": data.lat,
-                "lon": data.lon,
+                "lat": to_py_float(data.lat),
+                "lon": to_py_float(data.lon),
             },
             "bodies": results,
         }
@@ -226,16 +230,16 @@ def extended_ephemeris_endpoint(data: EphemerisRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             results[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": lat.degrees,
+                "lat_deg": to_py_float(lat.degrees),
                 "retrograde": retrograde_flag(observer, body, t),
             }
 
         return {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": data.tz},
+                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": data.lat,
-                "lon": data.lon,
+                "lat": to_py_float(data.lat),
+                "lon": to_py_float(data.lon),
             },
             "bodies": results,
         }
@@ -250,9 +254,7 @@ def extended_ephemeris_endpoint(data: EphemerisRequest):
 def western_chart(data: WesternChartRequest):
     try:
         if data.house_system not in HOUSE_SYSTEM_MAP:
-            return {
-                "error": f"Unsupported house_system '{data.house_system}'. Use one of {list(HOUSE_SYSTEM_MAP.keys())}."
-            }
+            return {"error": f"Unsupported house_system '{data.house_system}'. Use one of {list(HOUSE_SYSTEM_MAP.keys())}."}
 
         hsys = HOUSE_SYSTEM_MAP[data.house_system]
 
@@ -261,7 +263,7 @@ def western_chart(data: WesternChartRequest):
 
         observer = eph["earth"] + Topos(latitude_degrees=data.lat, longitude_degrees=data.lon)
 
-        # 1) Planet positions (Skyfield)
+        # Planet positions (Skyfield)
         skyfield_bodies = {
             "Sun": eph["sun"],
             "Moon": eph["moon"],
@@ -281,13 +283,13 @@ def western_chart(data: WesternChartRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             planets[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": lat.degrees,
+                "lat_deg": to_py_float(lat.degrees),
                 "retrograde": retrograde_flag(observer, body, t),
             }
 
-        # 2) Houses + angles (Swiss Ephemeris)
+        # Houses + angles (Swiss)
         jd_ut = swe_julday_ut(utc_dt)
-        cusps, ascmc = swe.houses(jd_ut, data.lat, data.lon, hsys)
+        cusps, ascmc = swe.houses(jd_ut, to_py_float(data.lat), to_py_float(data.lon), hsys)
 
         house_cusps, cusp_err = extract_house_cusps(cusps)
         if cusp_err or house_cusps is None:
@@ -295,7 +297,6 @@ def western_chart(data: WesternChartRequest):
                 "error": "Swiss Ephemeris returned unexpected cusp structure.",
                 "detail": cusp_err,
                 "raw_cusps_type": str(type(cusps)),
-                "note": "This is a library return-shape issue; we normalize known shapes (len=12 or len=13).",
             }
 
         asc = normalize_deg(ascmc[0])
@@ -306,19 +307,18 @@ def western_chart(data: WesternChartRequest):
         except Exception:
             vertex = None
 
-        # 3) Planet -> house assignment
+        # Planet -> house assignment
         planet_houses: Dict[str, int] = {}
-
         if data.house_system == "whole_sign":
             asc_sign = zodiac_sign_index(asc)
             for p, vals in planets.items():
                 p_sign = zodiac_sign_index(vals["lon_deg"])
-                planet_houses[p] = ((p_sign - asc_sign) % 12) + 1
+                planet_houses[p] = int(((p_sign - asc_sign) % 12) + 1)
         else:
             for p, vals in planets.items():
-                planet_houses[p] = assign_house_quadrant(vals["lon_deg"], house_cusps)
+                planet_houses[p] = int(assign_house_quadrant(vals["lon_deg"], house_cusps))
 
-        # 4) Points (nodes, Lilith, Priapus, Fortune)
+        # Points
         points: Dict[str, Any] = {}
         unavailable: Dict[str, str] = {}
 
@@ -350,7 +350,7 @@ def western_chart(data: WesternChartRequest):
             points["Lilith (i)"] = lilith_i
             points["Priapus (i)"] = normalize_deg(lilith_i + 180.0)
 
-        # Part of Fortune (day/night using chosen system’s Sun house)
+        # Part of Fortune
         sun_house = planet_houses.get("Sun")
         is_day_chart = True
         if sun_house is not None:
@@ -416,10 +416,10 @@ def western_chart(data: WesternChartRequest):
 
         return {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": data.tz},
+                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": data.lat,
-                "lon": data.lon,
+                "lat": to_py_float(data.lat),
+                "lon": to_py_float(data.lon),
                 "house_system": data.house_system,
                 "swiss_ephe_path": SWEPH_PATH,
             },
@@ -441,5 +441,4 @@ def western_chart(data: WesternChartRequest):
         return {
             "error": "Internal error in /western_chart",
             "trace": traceback.format_exc(),
-            "note": "This trace is returned intentionally to make debugging possible from curl/Postman.",
         }
