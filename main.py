@@ -34,6 +34,11 @@ HOUSE_SYSTEM_MAP: Dict[str, bytes] = {
     "placidus": b"P",
 }
 
+SIGN_NAMES = [
+    "Aries","Taurus","Gemini","Cancer","Leo","Virgo",
+    "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"
+]
+
 def sanitize(obj: Any) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
@@ -187,6 +192,10 @@ def western_chart(data: WesternChartRequest):
                 "retrograde": bool(speed_lon < 0.0),
                 "sign_index": int(lon // 30),
                 "deg_in_sign": float(lon % 30),
+                "sign": SIGN_NAMES[int(lon // 30)],
+                "deg": int(lon % 30),
+                "min": int(((lon % 30) - int(lon % 30)) * 60),
+                "sec": int(round(((((lon % 30) - int(lon % 30)) * 60) - int(((lon % 30) - int(lon % 30)) * 60)) * 60)),
             }
         cusps, ascmc = swe.houses(jd_ut, float(data.lat), float(data.lon), hsys)
 
