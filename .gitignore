@@ -7,3 +7,4 @@ overlay_natal.py.bak.*
 patch_*.py
 fix_*.py
 remove_*.py
+.DS_Store
