@@ -2,12 +2,13 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from skyfield.api import load, Topos
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Union
 import os
 import traceback
 import swisseph as swe
+from fastapi.responses import JSONResponse
 
-app = FastAPI(title="Skyfield Ephemeris API", version="1.2.4")
+app = FastAPI(title="Skyfield Ephemeris API", version="1.2.5")
 
 # ----------------------------
 # Global loads (faster on Render)
@@ -49,18 +50,68 @@ HOUSE_SYSTEM_MAP: Dict[str, bytes] = {
 }
 
 
-def to_py_float(x: Any) -> float:
-    # Handles numpy.float64, Decimal-like, etc.
-    return float(x)
+def sanitize(obj: Any) -> Any:
+    """
+    Recursively convert objects into JSON-serializable Python types.
 
+    Handles:
+      - numpy scalars/arrays (via .item() / .tolist())
+      - bytes -> str
+      - tuples -> lists
+      - dicts/lists recursively
+      - any object with __dict__ -> dict
+    """
+    # None, bool, int, float, str are fine
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
 
-def to_py_bool(x: Any) -> bool:
-    # Handles numpy.bool_ etc.
-    return bool(x)
+    # bytes -> str
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            return obj.decode("utf-8")
+        except Exception:
+            return str(obj)
+
+    # dict
+    if isinstance(obj, dict):
+        return {str(k): sanitize(v) for k, v in obj.items()}
+
+    # list
+    if isinstance(obj, list):
+        return [sanitize(x) for x in obj]
+
+    # tuple/set -> list
+    if isinstance(obj, (tuple, set)):
+        return [sanitize(x) for x in obj]
+
+    # numpy scalar: has .item()
+    if hasattr(obj, "item") and callable(getattr(obj, "item")):
+        try:
+            return sanitize(obj.item())
+        except Exception:
+            pass
+
+    # numpy array: has .tolist()
+    if hasattr(obj, "tolist") and callable(getattr(obj, "tolist")):
+        try:
+            return sanitize(obj.tolist())
+        except Exception:
+            pass
+
+    # fallback: objects with __dict__
+    if hasattr(obj, "__dict__"):
+        try:
+            return sanitize(vars(obj))
+        except Exception:
+            pass
+
+    # last resort
+    return str(obj)
 
 
 def normalize_deg(deg: Any) -> float:
-    return to_py_float(deg) % 360.0
+    # aggressively coerce to python float then normalize
+    return float(deg) % 360.0
 
 
 def to_utc_datetime(date_str: str, time_str: str, tz_offset: float) -> datetime:
@@ -74,7 +125,7 @@ def skyfield_time_from_utc(utc_dt: datetime):
 
 
 def zodiac_sign_index(lon_deg: float) -> int:
-    return int(lon_deg // 30)  # Aries=0 ... Pisces=11
+    return int(lon_deg // 30)
 
 
 def retrograde_flag(observer, body, t) -> bool:
@@ -82,11 +133,11 @@ def retrograde_flag(observer, body, t) -> bool:
     dt2 = dt1 + timedelta(hours=1)
     t2 = ts.utc(dt2.year, dt2.month, dt2.day, dt2.hour, dt2.minute, dt2.second)
 
-    p1 = to_py_float(observer.at(t).observe(body).apparent().ecliptic_latlon()[0].degrees)
-    p2 = to_py_float(observer.at(t2).observe(body).apparent().ecliptic_latlon()[0].degrees)
+    p1 = float(observer.at(t).observe(body).apparent().ecliptic_latlon()[0].degrees)
+    p2 = float(observer.at(t2).observe(body).apparent().ecliptic_latlon()[0].degrees)
 
     delta = ((p2 - p1 + 540.0) % 360.0) - 180.0
-    return to_py_bool(delta < 0.0)
+    return bool(delta < 0.0)
 
 
 def assign_house_quadrant(lonp: float, cusps_deg: List[float]) -> int:
@@ -103,7 +154,7 @@ def assign_house_quadrant(lonp: float, cusps_deg: List[float]) -> int:
 
 
 def swe_julday_ut(utc_dt: datetime) -> float:
-    return to_py_float(
+    return float(
         swe.julday(
             utc_dt.year,
             utc_dt.month,
@@ -146,15 +197,24 @@ def extract_house_cusps(cusps: Any) -> Tuple[Optional[List[float]], Optional[str
 
 
 # ----------------------------
-# Health check
+# Health + root (so Render pings don’t look like failures)
 # ----------------------------
+@app.get("/")
+def root():
+    return JSONResponse(content=sanitize({
+        "status": "ok",
+        "service": "skyfield-ephemeris-api",
+        "version": app.version
+    }))
+
+
 @app.get("/health")
 def health():
-    return {
+    return JSONResponse(content=sanitize({
         "status": "ok",
         "version": app.version,
-        "swiss_ephe_path": SWEPH_PATH,
-    }
+        "swiss_ephe_path": SWEPH_PATH
+    }))
 
 
 # ----------------------------
@@ -187,20 +247,24 @@ def ephemeris_endpoint(data: EphemerisRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             results[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": to_py_float(lat.degrees),
+                "lat_deg": float(lat.degrees),
             }
 
-        return {
+        payload = {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
+                "input_local": {"date": data.date, "time": data.time, "tz": float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": to_py_float(data.lat),
-                "lon": to_py_float(data.lon),
+                "lat": float(data.lat),
+                "lon": float(data.lon),
             },
             "bodies": results,
         }
+        return JSONResponse(content=sanitize(payload))
     except Exception:
-        return {"error": "Internal error in /ephemeris", "trace": traceback.format_exc()}
+        return JSONResponse(content=sanitize({
+            "error": "Internal error in /ephemeris",
+            "trace": traceback.format_exc(),
+        }), status_code=500)
 
 
 @app.post("/extended_ephemeris")
@@ -230,21 +294,25 @@ def extended_ephemeris_endpoint(data: EphemerisRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             results[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": to_py_float(lat.degrees),
+                "lat_deg": float(lat.degrees),
                 "retrograde": retrograde_flag(observer, body, t),
             }
 
-        return {
+        payload = {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
+                "input_local": {"date": data.date, "time": data.time, "tz": float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": to_py_float(data.lat),
-                "lon": to_py_float(data.lon),
+                "lat": float(data.lat),
+                "lon": float(data.lon),
             },
             "bodies": results,
         }
+        return JSONResponse(content=sanitize(payload))
     except Exception:
-        return {"error": "Internal error in /extended_ephemeris", "trace": traceback.format_exc()}
+        return JSONResponse(content=sanitize({
+            "error": "Internal error in /extended_ephemeris",
+            "trace": traceback.format_exc(),
+        }), status_code=500)
 
 
 # ----------------------------
@@ -254,7 +322,9 @@ def extended_ephemeris_endpoint(data: EphemerisRequest):
 def western_chart(data: WesternChartRequest):
     try:
         if data.house_system not in HOUSE_SYSTEM_MAP:
-            return {"error": f"Unsupported house_system '{data.house_system}'. Use one of {list(HOUSE_SYSTEM_MAP.keys())}."}
+            return JSONResponse(content=sanitize({
+                "error": f"Unsupported house_system '{data.house_system}'. Use one of {list(HOUSE_SYSTEM_MAP.keys())}."
+            }), status_code=400)
 
         hsys = HOUSE_SYSTEM_MAP[data.house_system]
 
@@ -283,25 +353,24 @@ def western_chart(data: WesternChartRequest):
             lon, lat, _dist = ast_pos.ecliptic_latlon()
             planets[name] = {
                 "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": to_py_float(lat.degrees),
+                "lat_deg": float(lat.degrees),
                 "retrograde": retrograde_flag(observer, body, t),
             }
 
         # Houses + angles (Swiss)
         jd_ut = swe_julday_ut(utc_dt)
-        cusps, ascmc = swe.houses(jd_ut, to_py_float(data.lat), to_py_float(data.lon), hsys)
+        cusps, ascmc = swe.houses(jd_ut, float(data.lat), float(data.lon), hsys)
 
         house_cusps, cusp_err = extract_house_cusps(cusps)
         if cusp_err or house_cusps is None:
-            return {
+            return JSONResponse(content=sanitize({
                 "error": "Swiss Ephemeris returned unexpected cusp structure.",
                 "detail": cusp_err,
                 "raw_cusps_type": str(type(cusps)),
-            }
+            }), status_code=500)
 
         asc = normalize_deg(ascmc[0])
         mc = normalize_deg(ascmc[1])
-
         try:
             vertex = normalize_deg(ascmc[3])
         except Exception:
@@ -414,12 +483,12 @@ def western_chart(data: WesternChartRequest):
             "note": "Conventional reference value (approx). Not computed from RA/Dec in this phase."
         }
 
-        return {
+        payload = {
             "meta": {
-                "input_local": {"date": data.date, "time": data.time, "tz": to_py_float(data.tz)},
+                "input_local": {"date": data.date, "time": data.time, "tz": float(data.tz)},
                 "utc_datetime": utc_dt.isoformat(),
-                "lat": to_py_float(data.lat),
-                "lon": to_py_float(data.lon),
+                "lat": float(data.lat),
+                "lon": float(data.lon),
                 "house_system": data.house_system,
                 "swiss_ephe_path": SWEPH_PATH,
             },
@@ -437,8 +506,10 @@ def western_chart(data: WesternChartRequest):
             "unavailable": unavailable,
         }
 
+        return JSONResponse(content=sanitize(payload))
+
     except Exception:
-        return {
+        return JSONResponse(content=sanitize({
             "error": "Internal error in /western_chart",
             "trace": traceback.format_exc(),
-        }
+        }), status_code=500)
