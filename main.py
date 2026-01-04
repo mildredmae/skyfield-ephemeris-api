@@ -63,10 +63,38 @@ def detect_aspects(planets: Dict[str, Any]) -> List[Dict[str, Any]]:
     Detect major aspects between planets.
     Input: planets dict with absolute longitudes (0–360).
     Output: list of aspect objects.
-    NOTE: Logic intentionally empty in Step 3.
     """
-    return []
+    aspects: List[Dict[str, Any]] = []
 
+    names = sorted(planets.keys())
+
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            a = names[i]
+            b = names[j]
+
+            lon1 = float(planets[a]["lon_deg"])
+            lon2 = float(planets[b]["lon_deg"])
+
+            delta = abs(lon1 - lon2)
+            if delta > 180.0:
+                delta = 360.0 - delta
+
+            for aspect_name, aspect_angle in ASPECT_ANGLES.items():
+                orb_limit = ASPECT_ORBS[aspect_name]
+                orb = abs(delta - aspect_angle)
+
+                if orb <= orb_limit:
+                    aspects.append({
+                        "planet_a": a,
+                        "planet_b": b,
+                        "aspect": aspect_name,
+                        "angle": aspect_angle,
+                        "orb": round(orb, 4),
+                        "exact": orb <= 0.1,
+                    })
+
+    return aspects
 def sanitize(obj: Any) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
