@@ -140,6 +140,8 @@ def respond(payload: Any, status_code: int = 200) -> JSONResponse:
     return JSONResponse(content=sanitize(payload), status_code=status_code)
 
 def normalize_deg(deg: Any) -> float:
+    return float(deg) % 360.0
+
 def normalize_dms(deg: int, minute: int, second: int):
     if second >= 60:
         second = 0
@@ -249,6 +251,11 @@ def western_chart(data: WesternChartRequest):
             lon = normalize_deg(xx[0])
             lat = float(xx[1])
             speed_lon = float(xx[3])
+            deg_i = int(lon % 30)
+            min_i = int(((lon % 30) - deg_i) * 60)
+            sec_i = int(round(((((lon % 30) - deg_i) * 60) - min_i) * 60))
+            deg_i, min_i, sec_i = normalize_dms(deg_i, min_i, sec_i)
+
             planets[name] = {
                 "lon_deg": lon,
                 "lat_deg": lat,
@@ -257,10 +264,6 @@ def western_chart(data: WesternChartRequest):
                 "sign_index": int(lon // 30),
                 "deg_in_sign": float(lon % 30),
                 "sign": SIGN_NAMES[int(lon // 30)],
-                deg_i = int(lon % 30)
-                min_i = int(((lon % 30) - deg_i) * 60)
-                sec_i = int(round(((((lon % 30) - deg_i) * 60) - min_i) * 60))
-                deg_i, min_i, sec_i = normalize_dms(deg_i, min_i, sec_i)
                 "deg": deg_i,
                 "min": min_i,
                 "sec": sec_i,
@@ -365,6 +368,11 @@ def transits_range(data: TransitsRangeRequest):
                 lat = float(xx[1])
                 speed_lon = float(xx[3])
 
+                deg_i = int(lon % 30)
+                min_i = int(((lon % 30) - deg_i) * 60)
+                sec_i = int(round(((((lon % 30) - deg_i) * 60) - min_i) * 60))
+                deg_i, min_i, sec_i = normalize_dms(deg_i, min_i, sec_i)
+
                 planets[name] = {
                     "lon_deg": lon,
                     "lat_deg": lat,
@@ -373,13 +381,9 @@ def transits_range(data: TransitsRangeRequest):
                     "sign_index": int(lon // 30),
                     "deg_in_sign": float(lon % 30),
                     "sign": SIGN_NAMES[int(lon // 30)],
-                deg_i = int(lon % 30)
-                min_i = int(((lon % 30) - deg_i) * 60)
-                sec_i = int(round(((((lon % 30) - deg_i) * 60) - min_i) * 60))
-                deg_i, min_i, sec_i = normalize_dms(deg_i, min_i, sec_i)
-                "deg": deg_i,
-                "min": min_i,
-                "sec": sec_i,
+                    "deg": deg_i,
+                    "min": min_i,
+                    "sec": sec_i,
                 }
 
             aspects = detect_aspects(planets)
