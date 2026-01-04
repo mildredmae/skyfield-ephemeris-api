@@ -17,7 +17,7 @@ app = FastAPI(
 ts = load.timescale()
 eph = load("de440s.bsp")
 
-SWEPH_PATH = os.getenv("SWEPH_PATH", ".")
+SWEPH_PATH = os.getenv("SWEPH_PATH", "ephe")
 swe.set_ephe_path(SWEPH_PATH)
 
 class WesternChartRequest(BaseModel):
