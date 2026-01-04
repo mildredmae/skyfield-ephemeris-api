@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import os
 import swisseph as swe
 
-app = FastAPI(title="Skyfield Ephemeris API", version="1.2.0")
+app = FastAPI(title="Skyfield Ephemeris API", version="1.2.1")
 
 # ----------------------------
 # Global loads (faster on Render)
@@ -14,7 +14,6 @@ ts = load.timescale()
 eph = load("de440s.bsp")
 
 # Swiss ephemeris path (where optional data files can live)
-# If you don't set SWEPH_PATH, we default to current directory.
 SWEPH_PATH = os.getenv("SWEPH_PATH", ".")
 swe.set_ephe_path(SWEPH_PATH)
 
@@ -41,10 +40,11 @@ class WesternChartRequest(BaseModel):
 # ----------------------------
 # Helpers
 # ----------------------------
+# IMPORTANT: pyswisseph expects the house system code as a 1-byte value (bytes length 1)
 HOUSE_SYSTEM_MAP = {
-    "whole_sign": "W",  # Whole Sign
-    "porphyry": "O",    # Porphyry
-    "placidus": "P",    # Placidus
+    "whole_sign": b"W",  # Whole Sign
+    "porphyry": b"O",    # Porphyry
+    "placidus": b"P",    # Placidus
 }
 
 
@@ -138,8 +138,6 @@ def swe_fixstar_lon(jd_ut: float, star_name: str):
     Returns (lon_deg, err=None) or (None, err=str)
     """
     try:
-        # fixstar2_ut returns (starpos, retflag)
-        # starpos[0] is ecliptic longitude in degrees
         starpos, _retflag = swe.fixstar2_ut(star_name, jd_ut)
         lon = normalize_deg(starpos[0])
         return lon, None
@@ -239,7 +237,7 @@ def western_chart(data: WesternChartRequest):
     """
     Canonical Western chart packet for Astrology Bob.
 
-    Phase 2 adds:
+    Phase 2 includes:
       - Nodes (mean/true + derived north/south)
       - Lilith (mean apogee), Lilith (i) (interpolated apogee), Priapus (i)
       - Vertex (from ascmc)
@@ -298,12 +296,10 @@ def western_chart(data: WesternChartRequest):
         }
 
     house_cusps = [normalize_deg(cusps[i]) for i in range(1, 13)]
-
     asc = normalize_deg(ascmc[0])
     mc = normalize_deg(ascmc[1])
 
     # Vertex is typically ascmc[3] in pyswisseph
-    vertex = None
     try:
         vertex = normalize_deg(ascmc[3])
     except Exception:
@@ -325,7 +321,6 @@ def western_chart(data: WesternChartRequest):
     points = {}
     points_unavailable = {}
 
-    # Mean Node / True Node
     mean_node, err = swe_calc_lon(jd_ut, swe.MEAN_NODE)
     if err:
         points_unavailable["Mean Node"] = err
@@ -340,14 +335,12 @@ def western_chart(data: WesternChartRequest):
     else:
         points["True Node"] = true_node
 
-    # Lilith = Mean Apogee
     lilith_mean, err = swe_calc_lon(jd_ut, swe.MEAN_APOG)
     if err:
         points_unavailable["Lilith"] = err
     else:
         points["Lilith"] = lilith_mean
 
-    # Lilith (i) = Interpolated Apogee
     lilith_i, err = swe_calc_lon(jd_ut, swe.INTP_APOG)
     if err:
         points_unavailable["Lilith (i)"] = err
@@ -356,13 +349,11 @@ def western_chart(data: WesternChartRequest):
         points["Lilith (i)"] = lilith_i
         points["Priapus (i)"] = normalize_deg(lilith_i + 180.0)
 
-    # 7) Part of Fortune (using selected house system)
-    # Day chart if Sun is above horizon; we approximate using house placement in chosen system.
+    # 7) Part of Fortune (day/night formula using the selected house system)
     sun_house = planet_houses.get("Sun")
     is_day_chart = True
     if sun_house is not None:
-        # Houses 7-12 = above horizon (day)
-        is_day_chart = sun_house >= 7
+        is_day_chart = sun_house >= 7  # houses 7-12 above horizon
 
     sun_lon = planets["Sun"]["lon_deg"]
     moon_lon = planets["Moon"]["lon_deg"]
@@ -374,19 +365,14 @@ def western_chart(data: WesternChartRequest):
 
     points["Fortune"] = fortune
 
-    # 8) Optional bodies that require Swiss data files (asteroids/TNOs/fixed stars)
-    # If the required Swiss files aren't present, we return them as unavailable with error details.
-    # Asteroid IDs use swe.AST_OFFSET + object_number
+    # 8) Optional bodies requiring Swiss data files (asteroids/TNOs/fixed stars)
     asteroid_map = {
-        # Asteroids / centaurs
         "Ceres": 1,
         "Pallas": 2,
         "Juno": 3,
         "Vesta": 4,
         "Chiron": 2060,
         "Pholus": 5145,
-
-        # TNOs / dwarf planets / KBOs
         "Eris": 136199,
         "Haumea": 136108,
         "Ixion": 28978,
@@ -404,8 +390,6 @@ def western_chart(data: WesternChartRequest):
         else:
             points[name] = lon
 
-    # Fixed stars (Swiss star catalog required)
-    # NOTE: Star naming can be picky; if these don't resolve, the error will tell you.
     star_map = {
         "Aldebaran": "Aldebaran",
         "Antares": "Antares",
@@ -422,10 +406,7 @@ def western_chart(data: WesternChartRequest):
         else:
             points[label] = lon
 
-    # Galactic Center:
-    # There isn't a universally standardized single-value implementation in Swiss by default.
-    # For now, we provide a conventional reference longitude (J2000-ish) and label it as such.
-    # If you want it computed from RA/Dec precisely, we can add that in a later phase.
+    # Galactic Center: conventional reference for now
     points["Galactic Center"] = {
         "mode": "conventional_reference",
         "lon_deg": 266.4,
