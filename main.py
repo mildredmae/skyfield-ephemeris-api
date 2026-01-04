@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI(
     title="Skyfield Ephemeris API",
-    version="1.2.7",
+    version="1.2.8",
     default_response_class=JSONResponse,
 )
 
@@ -137,11 +137,12 @@ def extract_house_cusps(cusps: Any) -> Tuple[Optional[List[float]], Optional[str
 
     return None, f"Unexpected cusps length: {n}. Raw cusps={cusps}"
 
-@app.get("/")
+# IMPORTANT: allow GET + HEAD so Render pings don’t get 405
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return respond({"status": "ok", "service": "skyfield-ephemeris-api", "version": app.version})
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return respond({"status": "ok", "version": app.version, "swiss_ephe_path": SWEPH_PATH})
 
