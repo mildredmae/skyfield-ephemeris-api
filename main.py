@@ -157,34 +157,37 @@ def western_chart(data: WesternChartRequest):
 
         hsys = HOUSE_SYSTEM_MAP[data.house_system]
         utc_dt = to_utc_datetime(data.date, data.time, data.tz)
-        t = skyfield_time_from_utc(utc_dt)
+        jd_ut = swe_julday_ut(utc_dt)
 
-        observer = eph["earth"] + Topos(latitude_degrees=data.lat, longitude_degrees=data.lon)
-
-        skyfield_bodies = {
-            "Sun": eph["sun"],
-            "Moon": eph["moon"],
-            "Mercury": eph["mercury barycenter"],
-            "Venus": eph["venus barycenter"],
-            "Mars": eph["mars barycenter"],
-            "Jupiter": eph["jupiter barycenter"],
-            "Saturn": eph["saturn barycenter"],
-            "Uranus": eph["uranus barycenter"],
-            "Neptune": eph["neptune barycenter"],
-            "Pluto": eph["pluto barycenter"],
+        # Planet positions via Swiss Ephemeris (astrology-accurate longitudes + speeds)
+        flags = swe.FLG_SWIEPH | swe.FLG_SPEED
+        swe_body_map = {
+            "Sun": swe.SUN,
+            "Moon": swe.MOON,
+            "Mercury": swe.MERCURY,
+            "Venus": swe.VENUS,
+            "Mars": swe.MARS,
+            "Jupiter": swe.JUPITER,
+            "Saturn": swe.SATURN,
+            "Uranus": swe.URANUS,
+            "Neptune": swe.NEPTUNE,
+            "Pluto": swe.PLUTO,
         }
 
         planets: Dict[str, Any] = {}
-        for name, body in skyfield_bodies.items():
-            ast_pos = observer.at(t).observe(body).apparent()
-            lon, lat, _dist = ast_pos.ecliptic_latlon()
+        for name, swe_id in swe_body_map.items():
+            xx, _ = swe.calc_ut(jd_ut, swe_id, flags)
+            lon = normalize_deg(xx[0])
+            lat = float(xx[1])
+            speed_lon = float(xx[3])
             planets[name] = {
-                "lon_deg": normalize_deg(lon.degrees),
-                "lat_deg": float(lat.degrees),
-                "retrograde": retrograde_flag(observer, body, t),
+                "lon_deg": lon,
+                "lat_deg": lat,
+                "speed_lon_deg_per_day": speed_lon,
+                "retrograde": bool(speed_lon < 0.0),
+                "sign_index": int(lon // 30),
+                "deg_in_sign": float(lon % 30),
             }
-
-        jd_ut = swe_julday_ut(utc_dt)
         cusps, ascmc = swe.houses(jd_ut, float(data.lat), float(data.lon), hsys)
 
         house_cusps, cusp_err = extract_house_cusps(cusps)
