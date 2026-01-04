@@ -253,6 +253,14 @@ def western_chart(data: WesternChartRequest):
                 "min": int(((lon % 30) - int(lon % 30)) * 60),
                 "sec": int(round(((((lon % 30) - int(lon % 30)) * 60) - int(((lon % 30) - int(lon % 30)) * 60)) * 60)),
             }
+
+            aspects = detect_aspects(planets)
+
+            positions.append({
+                "utc_datetime": cur.isoformat(),
+                "planets": planets,
+                "aspects": aspects
+            })
         cusps, ascmc = swe.houses(jd_ut, float(data.lat), float(data.lon), hsys)
 
         house_cusps, cusp_err = extract_house_cusps(cusps)
@@ -358,10 +366,14 @@ def transits_range(data: TransitsRangeRequest):
                     "sec": int(round(((((lon % 30) - int(lon % 30)) * 60) - int(((lon % 30) - int(lon % 30)) * 60)) * 60)),
                 }
 
+            aspects = detect_aspects(planets)
+
             positions.append({
                 "utc_datetime": cur.isoformat(),
-                "planets": planets
+                "planets": planets,
+                "aspects": aspects
             })
+
 
             cur = cur + timedelta(hours=1)
 
