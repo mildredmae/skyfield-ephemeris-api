@@ -38,6 +38,34 @@ SIGN_NAMES = [
     "Aries","Taurus","Gemini","Cancer","Leo","Virgo",
     "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"
 ]
+# ----------------------------
+# Aspect detection (v1)
+# ----------------------------
+
+ASPECT_ANGLES = {
+    "conjunction": 0,
+    "sextile": 60,
+    "square": 90,
+    "trine": 120,
+    "opposition": 180,
+}
+
+ASPECT_ORBS = {
+    "conjunction": 8.0,
+    "opposition": 8.0,
+    "square": 6.0,
+    "trine": 6.0,
+    "sextile": 4.0,
+}
+
+def detect_aspects(planets: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Detect major aspects between planets.
+    Input: planets dict with absolute longitudes (0–360).
+    Output: list of aspect objects.
+    NOTE: Logic intentionally empty in Step 3.
+    """
+    return []
 
 def sanitize(obj: Any) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
