@@ -5,3 +5,4 @@ skyfield-data
 pydantic
 requests
 pandas
+pyswisseph
