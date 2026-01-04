@@ -1,2 +1,9 @@
 de440s.bsp
 __pycache__/
+
+# Local one-off patch/helpers and backups (do not commit)
+main.py.bak.*
+overlay_natal.py.bak.*
+patch_*.py
+fix_*.py
+remove_*.py
