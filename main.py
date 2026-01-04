@@ -7,6 +7,7 @@ import os
 import traceback
 import swisseph as swe
 from fastapi.responses import JSONResponse
+from overlay_natal import NatalInput, build_natal_chart, augment_transits_with_natal_overlay
 
 app = FastAPI(
     title="Skyfield Ephemeris API",
@@ -313,6 +314,13 @@ def western_chart(data: WesternChartRequest):
     except Exception:
         return respond({"error": "Internal error in /western_chart", "trace": traceback.format_exc()}, status_code=500)
 
+class NatalPayload(BaseModel):
+    date: str   # YYYY-MM-DD (local)
+    time: str   # HH:MM (local)
+    tz: float   # local offset hours (e.g., -5, 0)
+    lat: float
+    lon: float
+
 class TransitsRangeRequest(BaseModel):
     start_date: str         # YYYY-MM-DD (local)
     start_time: str         # HH:MM (local)
@@ -322,6 +330,8 @@ class TransitsRangeRequest(BaseModel):
     lat: float
     lon: float
     house_system: str = "porphyry"  # keep for later (house activations)
+    natal_overlay: bool = False
+    natal: "NatalPayload | None" = None
 
 @app.post("/transits_range")
 def transits_range(data: TransitsRangeRequest):
@@ -389,6 +399,26 @@ def transits_range(data: TransitsRangeRequest):
 
 
             cur = cur + timedelta(hours=1)
+
+        # Natal overlay (v1): natal_aspects only
+        if data.natal_overlay:
+            if data.natal is None:
+                return respond({"error": "natal required when natal_overlay=true"}, status_code=400)
+
+            natal_input = NatalInput(
+                date=data.natal.date,
+                time=data.natal.time,
+                tz=float(data.natal.tz),
+                lat=float(data.natal.lat),
+                lon=float(data.natal.lon),
+            )
+            natal_chart = build_natal_chart(natal_input, house_system=data.house_system)
+            positions = augment_transits_with_natal_overlay(
+                transits=positions,
+                natal_chart=natal_chart,
+                include_natal_aspects=True,
+                include_house_activations=False,
+            )
 
         return respond({
             "meta": {

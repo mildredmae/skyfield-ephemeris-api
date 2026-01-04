@@ -101,7 +101,11 @@ def _calc_planets(dt_utc: datetime) -> Dict[str, Dict[str, Any]]:
     jd = _to_jd_ut(dt_utc)
     out: Dict[str, Dict[str, Any]] = {}
     for name, pid in PLANETS:
-        lon, lat, dist, speed_lon = swe.calc_ut(jd, pid)[0]
+        xx, _retflag = swe.calc_ut(jd, pid)
+        lon = xx[0]
+        lat = xx[1]
+        dist = xx[2]
+        speed_lon = xx[3]
         lon = float(lon)
         lat = float(lat)
         speed_lon = float(speed_lon)
@@ -133,7 +137,15 @@ def _calc_houses(dt_utc: datetime, lat: float, lon: float, house_system: str) ->
 
     cusps, ascmc = swe.houses_ex(jd, lat, lon, hs_map[house_system])
 
-    house_cusps = [float(cusps[i]) for i in range(1, 13)]
+    # Swiss Ephemeris cusp indexing can vary by build/return shape.
+    # Some return cusps with indices 1..12 (length 13, index 0 unused),
+    # others return 0..11 (length 12). Normalize to 12 cusps.
+    if len(cusps) >= 13:
+        house_cusps = [float(cusps[i]) for i in range(1, 13)]
+    elif len(cusps) >= 12:
+        house_cusps = [float(cusps[i]) for i in range(0, 12)]
+    else:
+        raise ValueError(f"Unexpected cusps length: {len(cusps)}")
     angles = {
         "asc": float(ascmc[0]),
         "mc": float(ascmc[1]),
