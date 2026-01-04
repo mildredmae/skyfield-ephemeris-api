@@ -269,13 +269,6 @@ def western_chart(data: WesternChartRequest):
                 "sec": sec_i,
             }
 
-            aspects = detect_aspects(planets)
-
-            positions.append({
-                "utc_datetime": cur.isoformat(),
-                "planets": planets,
-                "aspects": aspects
-            })
         cusps, ascmc = swe.houses(jd_ut, float(data.lat), float(data.lon), hsys)
 
         house_cusps, cusp_err = extract_house_cusps(cusps)
