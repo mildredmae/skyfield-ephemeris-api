@@ -19,8 +19,9 @@ ts = load.timescale()
 eph = load("de440s.bsp")
 
 SWEPH_PATH = os.getenv("SWEPH_PATH", "ephe")
-swe.set_ephe_path(SWEPH_PATH)
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SWEPH_PATH_ABS = os.path.join(BASE_DIR, SWEPH_PATH)
+swe.set_ephe_path(SWEPH_PATH_ABS)
 class WesternChartRequest(BaseModel):
     date: str
     time: str
