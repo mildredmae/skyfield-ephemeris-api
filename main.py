@@ -462,7 +462,7 @@ def transits_range(data: TransitsRangeRequest):
                 transits=positions,
                 natal_chart=natal_chart,
                 include_natal_aspects=True,
-                include_house_activations=False,
+                include_house_activations=True,
             )
 
         return respond({
