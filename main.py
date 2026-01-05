@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from skyfield.api import load, Topos
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any, Tuple
 import os
 import traceback
@@ -486,4 +486,177 @@ def transits_range(data: TransitsRangeRequest):
 
     except Exception:
         return respond({"error": "Internal error in /transits_range", "trace": traceback.format_exc()}, status_code=500)
+# ============================================================
+# Moon Next Sign (minute-accurate) — backend-only capability
+# ============================================================
 
+class MoonNextSignRequest(BaseModel):
+    start_date: str  # YYYY-MM-DD
+    start_time: str  # HH:MM (24h)
+    tz: float        # hours offset from UTC, e.g. -5, 0, 1
+    target_sign: str # e.g., "Leo"
+    max_days: int = 30
+    coarse_step_minutes: int = 30
+
+
+def _to_utc_datetime_from_local(date_str: str, time_str: str, tz_hours: float) -> datetime:
+    y, m, d = [int(x) for x in date_str.split("-")]
+    hh, mm = [int(x) for x in time_str.split(":")]
+    offset = timedelta(hours=float(tz_hours))
+    tzinfo = timezone(offset)
+    dt_local = datetime(y, m, d, hh, mm, 0, tzinfo=tzinfo)
+    return dt_local.astimezone(timezone.utc).replace(tzinfo=None)  # naive UTC
+
+
+def _moon_lon_and_sign(dt_utc: datetime) -> Tuple[float, int, str]:
+    # Swiss Ephemeris expects UT; build fractional hour
+    jd = swe.julday(
+        dt_utc.year, dt_utc.month, dt_utc.day,
+        dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0
+    )
+    flags = swe.FLG_SWIEPH
+    xx, _ = swe.calc_ut(jd, swe.MOON, flags)
+    lon = float(xx[0]) % 360.0
+    sign_index = int(lon // 30)
+    return lon, sign_index, SIGN_NAMES[sign_index]
+
+
+def _parse_sign_index(name: str) -> int:
+    n = str(name).strip().lower()
+    for i, sname in enumerate(SIGN_NAMES):
+        if sname.lower() == n:
+            return i
+    raise ValueError(f"Unknown sign '{name}'. Must be one of: {', '.join(SIGN_NAMES)}")
+
+
+def _find_next_moon_sign_ingress_minute(
+    start_utc: datetime,
+    target_sign_index: int,
+    max_days: int,
+    coarse_step_minutes: int,
+) -> Dict[str, Any]:
+    if max_days <= 0:
+        raise ValueError("max_days must be > 0")
+    if coarse_step_minutes <= 0:
+        raise ValueError("coarse_step_minutes must be > 0")
+
+    # Determine starting sign
+    _, start_sign_index, start_sign_name = _moon_lon_and_sign(start_utc)
+    already_in_target = (start_sign_index == target_sign_index)
+
+    # "next move into X sign" means an ingress event (prev != target, now == target)
+    # If already in target at start, we wait until it leaves, then look for the next ingress back into target.
+    waiting_for_exit = already_in_target
+
+    prev_dt = start_utc
+    _, prev_sign_index, prev_sign_name = _moon_lon_and_sign(prev_dt)
+
+    # Coarse scan forward to bracket ingress
+    end_utc = start_utc + timedelta(days=int(max_days))
+    step = timedelta(minutes=int(coarse_step_minutes))
+
+    cur_dt = prev_dt + step
+    while cur_dt <= end_utc:
+        _, cur_sign_index, cur_sign_name = _moon_lon_and_sign(cur_dt)
+
+        if waiting_for_exit:
+            if cur_sign_index != target_sign_index:
+                waiting_for_exit = False
+            prev_dt, prev_sign_index, prev_sign_name = cur_dt, cur_sign_index, cur_sign_name
+            cur_dt = cur_dt + step
+            continue
+
+        # We have exited target (or never were in it). Look for first time we are in target.
+        if cur_sign_index == target_sign_index and prev_sign_index != target_sign_index:
+            # Bracket is (prev_dt, cur_dt]
+            low = prev_dt
+            high = cur_dt
+
+            # Binary search to the minute: find earliest time in [low, high] where sign == target
+            while (high - low).total_seconds() > 60:
+                mid = low + timedelta(seconds=int((high - low).total_seconds() // 2))
+                _, mid_sign_index, _ = _moon_lon_and_sign(mid)
+                if mid_sign_index == target_sign_index:
+                    high = mid
+                else:
+                    low = mid
+
+            # Normalize to minute boundary (best effort minute accuracy)
+            high_min = high.replace(second=0, microsecond=0)
+
+            _, from_idx, from_name = _moon_lon_and_sign((high_min - timedelta(minutes=1)))
+            _, to_idx, to_name = _moon_lon_and_sign(high_min)
+
+            return {
+                "found": True,
+                "utc_datetime": high_min.isoformat(),
+                "from_sign": from_name,
+                "to_sign": to_name,
+                "start_sign": start_sign_name,
+                "already_in_target_at_start": bool(already_in_target),
+            }
+
+        prev_dt, prev_sign_index, prev_sign_name = cur_dt, cur_sign_index, cur_sign_name
+        cur_dt = cur_dt + step
+
+    return {
+        "found": False,
+        "utc_datetime": None,
+        "from_sign": None,
+        "to_sign": None,
+        "start_sign": start_sign_name,
+        "already_in_target_at_start": bool(already_in_target),
+    }
+
+
+@app.post("/moon_next_sign")
+def moon_next_sign(data: MoonNextSignRequest):
+    """
+    Minute-accurate (best effort) next ingress of the Moon into a target tropical sign,
+    computed from a user-provided local start datetime + tz.
+    """
+    try:
+        start_utc = _to_utc_datetime_from_local(data.start_date, data.start_time, float(data.tz))
+        target_idx = _parse_sign_index(data.target_sign)
+
+        res = _find_next_moon_sign_ingress_minute(
+            start_utc=start_utc,
+            target_sign_index=target_idx,
+            max_days=int(data.max_days),
+            coarse_step_minutes=int(data.coarse_step_minutes),
+        )
+
+        if res["found"]:
+            # Compute local datetime using the input tz (fixed offset)
+            offset = timedelta(hours=float(data.tz))
+            dt_local = (datetime.fromisoformat(res["utc_datetime"]) + offset).replace(second=0, microsecond=0)
+            local_iso = dt_local.isoformat()
+        else:
+            local_iso = None
+
+        return respond({
+            "meta": {
+                "input_local": {
+                    "start_date": data.start_date,
+                    "start_time": data.start_time,
+                    "tz": float(data.tz),
+                    "target_sign": data.target_sign,
+                    "max_days": int(data.max_days),
+                    "coarse_step_minutes": int(data.coarse_step_minutes),
+                },
+                "utc_start": start_utc.isoformat(),
+                "swiss_ephe_path": SWEPH_PATH,
+            },
+            "result": {
+                "found": res["found"],
+                "utc_datetime": res["utc_datetime"],
+                "local_datetime": local_iso,
+                "from_sign": res["from_sign"],
+                "to_sign": res["to_sign"],
+                "start_sign": res.get("start_sign"),
+                "already_in_target_at_start": res.get("already_in_target_at_start"),
+            }
+        })
+
+    except Exception:
+        return respond({"error": "Internal error in /moon_next_sign", "trace": traceback.format_exc()}, status_code=500)
