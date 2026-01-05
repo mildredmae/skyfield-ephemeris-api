@@ -346,6 +346,8 @@ class TransitsRangeRequest(BaseModel):
     lat: float
     lon: float
     house_system: str = "porphyry"  # keep for later (house activations)
+    bodies: str = "major"          # "major" | "expanded"
+    aspects_bodies: str = "major"  # "major" | "selected"
     natal_overlay: bool = False
     natal: "NatalPayload | None" = None
 
@@ -361,7 +363,7 @@ def transits_range(data: TransitsRangeRequest):
 
         # Hourly sampling (inclusive of start, exclusive of end)
         flags = swe.FLG_SWIEPH | swe.FLG_SPEED
-        swe_body_map = {
+        swe_body_map_major = {
             "Sun": swe.SUN,
             "Moon": swe.MOON,
             "Mercury": swe.MERCURY,
@@ -373,6 +375,33 @@ def transits_range(data: TransitsRangeRequest):
             "Neptune": swe.NEPTUNE,
             "Pluto": swe.PLUTO,
         }
+
+        swe_body_map_expanded = {
+            **swe_body_map_major,
+            # Phase 1A (Asteroids / Minor Bodies)
+            "Chiron": swe.CHIRON,
+            "Pholus": swe.PHOLUS,
+            "Ceres": swe.CERES,
+            "Pallas": swe.PALLAS,
+            "Juno": swe.JUNO,
+            "Vesta": swe.VESTA,
+            "Varuna": swe.VARUNA,
+            # Phase 1B (Nodes & Points)
+            "Mean Node": swe.MEAN_NODE,
+            "True Node": swe.TRUE_NODE,
+            "Mean Apogee": swe.MEAN_APOG,
+            "Osculating Apogee": swe.OSCU_APOG,
+            "Earth": swe.EARTH,
+            "Interpolated Apogee": swe.INTP_APOG,
+            "Interpolated Perigee": swe.INTP_PERG,
+        }
+
+        if data.bodies not in ("major", "expanded"):
+            return respond({"error": "Unsupported bodies value", "detail": "Use one of: major, expanded"}, status_code=400)
+        if data.aspects_bodies not in ("major", "selected"):
+            return respond({"error": "Unsupported aspects_bodies value", "detail": "Use one of: major, selected"}, status_code=400)
+
+        swe_body_map = swe_body_map_major if data.bodies == "major" else swe_body_map_expanded
 
         positions: List[Dict[str, Any]] = []
 
@@ -404,8 +433,8 @@ def transits_range(data: TransitsRangeRequest):
                     "min": min_i,
                     "sec": sec_i,
                 }
-
-            aspects = detect_aspects(planets)
+            aspects_input = planets if data.aspects_bodies == "selected" else {k: planets[k] for k in swe_body_map_major.keys()}
+            aspects = detect_aspects(aspects_input)
 
             positions.append({
                 "utc_datetime": cur.isoformat(),
