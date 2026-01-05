@@ -217,7 +217,7 @@ def root():
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    return respond({"status": "ok", "version": app.version, "swiss_ephe_path": SWEPH_PATH})
+    return respond({"status": "ok", "version": app.version, "swiss_ephe_path": SWEPH_PATH, "swiss_ephe_path_abs": SWEPH_PATH_ABS, "swiss_ephe_dir_exists": bool(os.path.isdir(SWEPH_PATH_ABS)), "seas_18_present": bool(os.path.exists(os.path.join(SWEPH_PATH_ABS, "seas_18.se1")))})
 
 @app.post("/western_chart")
 def western_chart(data: WesternChartRequest):
