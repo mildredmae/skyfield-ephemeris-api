@@ -220,6 +220,17 @@ def _parse_local_datetime(natal: NatalInput) -> datetime:
     return datetime(y, m, d, hh, mm, 0, tzinfo=tzinfo)
 
 
+
+def _whole_sign_house(lon_deg: float, asc_deg: float) -> int:
+    """
+    Whole Sign houses: house = sign distance from Asc sign + 1
+    lon_deg and asc_deg are ecliptic longitudes in degrees [0, 360).
+    """
+    p_sign = int(float(lon_deg) // 30)
+    asc_sign = int(float(asc_deg) // 30)
+    return ((p_sign - asc_sign) % 12) + 1
+
+
 def build_natal_chart(
     natal: NatalInput,
     house_system: str,
@@ -231,7 +242,14 @@ def build_natal_chart(
     natal_lons = {k: float(v["lon"]) for k, v in planets.items()}
 
     houses = _calc_houses(dt_utc, natal.lat, natal.lon, house_system)
-    planet_houses = {p: _house_of_lon(lon, houses["house_cusps"]) for p, lon in natal_lons.items()}
+    asc_deg = houses.get("angles", {}).get("asc")
+    if asc_deg is None:
+        raise ValueError("Missing asc in houses[\"angles\"] for whole_sign alignment")
+    asc_deg = float(asc_deg)
+    if house_system == "whole_sign":
+        planet_houses = {p: _whole_sign_house(lon, asc_deg) for p, lon in natal_lons.items()}
+    else:
+        planet_houses = {p: _house_of_lon(lon, houses["house_cusps"]) for p, lon in natal_lons.items()}
 
     return {
         "meta": {
@@ -281,7 +299,18 @@ def augment_transits_with_natal_overlay(
         natal_aspects = compute_transit_natal_aspects(t_lons, natal_lons) if include_natal_aspects else []
         natal_aspects_series.append(natal_aspects)
 
-        acts = [{"transit_planet": p, "natal_house": _house_of_lon(lon, cusps)} for p, lon in t_lons.items()] if include_house_activations else []
+        if include_house_activations:
+            hs = str(natal_chart.get("house_system", "")).lower()
+            asc_deg = natal_chart.get("angles", {}).get("asc")
+            if asc_deg is None:
+                raise ValueError("Missing asc in natal_chart[\"angles\"] for whole_sign house_activations")
+            asc_deg = float(asc_deg)
+            if hs == "whole_sign":
+                acts = [{"transit_planet": p, "natal_house": _whole_sign_house(lon, asc_deg)} for p, lon in t_lons.items()]
+            else:
+                acts = [{"transit_planet": p, "natal_house": _house_of_lon(lon, cusps)} for p, lon in t_lons.items()]
+        else:
+            acts = []
         house_act_series.append(acts)
 
     # Applying flag via lookahead
