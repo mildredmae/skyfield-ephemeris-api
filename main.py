@@ -217,11 +217,12 @@ def root():
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    return respond({"status": "ok", "version": app.version, "swiss_ephe_path": SWEPH_PATH, "swiss_ephe_path_abs": SWEPH_PATH_ABS, "swiss_ephe_dir_exists": bool(os.path.isdir(SWEPH_PATH_ABS)), "seas_18_present": bool(os.path.exists(os.path.join(SWEPH_PATH_ABS, "seas_18.se1")))})
+    return respond({"status": "ok", "version": app.version, "swiss_ephe_path": SWEPH_PATH, "swiss_ephe_path_abs": SWEPH_PATH_ABS, "swiss_ephe_dir_exists": bool(os.path.isdir(SWEPH_PATH_ABS)), "seas_18_present": bool(os.path.exists(os.path.join(SWEPH_PATH_ABS, "seas_18.se1"))), "cwd": os.getcwd()})
 
 @app.post("/western_chart")
 def western_chart(data: WesternChartRequest):
     try:
+        swe.set_ephe_path(SWEPH_PATH_ABS)
         if data.house_system not in HOUSE_SYSTEM_MAP:
             return respond(
                 {"error": f"Unsupported house_system '{data.house_system}'. Use one of {list(HOUSE_SYSTEM_MAP.keys())}."},
