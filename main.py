@@ -244,6 +244,20 @@ def western_chart(data: WesternChartRequest):
             "Uranus": swe.URANUS,
             "Neptune": swe.NEPTUNE,
             "Pluto": swe.PLUTO,
+            "Chiron": swe.CHIRON,
+            "Pholus": swe.PHOLUS,
+            "Ceres": swe.CERES,
+            "Pallas": swe.PALLAS,
+            "Juno": swe.JUNO,
+            "Vesta": swe.VESTA,
+            "Varuna": swe.VARUNA,
+            "Mean Node": swe.MEAN_NODE,
+            "True Node": swe.TRUE_NODE,
+            "Mean Apogee": swe.MEAN_APOG,
+            "Osculating Apogee": swe.OSCU_APOG,
+            "Earth": swe.EARTH,
+            "Interpolated Apogee": swe.INTP_APOG,
+            "Interpolated Perigee": swe.INTP_PERG,
         }
 
         planets: Dict[str, Any] = {}
